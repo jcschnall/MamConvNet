@@ -24,6 +24,7 @@ generally follows the tensor flow tutorial on conv neur nets
 remote github repository:  MamConvNet
 
 
+a change
 '''
 
 
