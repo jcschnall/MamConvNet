@@ -1,0 +1,3 @@
+[submodule "ljpeg"]
+	path = ljpeg
+	url = https://github.com/aaalgo/ljpeg.git
