@@ -17,16 +17,12 @@ Summary of available functions:
  # Create a graph to run one step of training with respect to the loss.
  train_op = train(loss, global_step)
 """
-# pylint: disable=missing-docstring
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import os
+
 import re
-import sys
-import tarfile
-from six import moves
 import tensorflow as tf
 import readFile
 
@@ -36,13 +32,14 @@ FLAGS = tf.app.flags.FLAGS
 # Basic model parameters.
 tf.app.flags.DEFINE_integer('batch_size', 10,     # for now, will increase to 100 again after get more images
                             """Number of images to process in a batch.""")
-tf.app.flags.DEFINE_string('data_dir', '/Users/Josh/Desktop/BioNeurNets/mamoData',
-                           """Path to the CIFAR-10 data directory.""")
+tf.app.flags.DEFINE_string('data_dir', '/Users/Josh/PycharmProjects/mamoConvAI/ljpeg/convertedMamoData',
+                           """Path to the data directory.""")
 tf.app.flags.DEFINE_boolean('use_fp16', False,
-                            """Train the model using fp16.""")
+                            """Train the model using fp16 rather than floating point 32.""")
+
+
 
 # Global constants describing data set.
-# IMAGE_SIZE = readFile.IMAGE_SIZE   # my images won't be square will need different height and width
 IMAGE_WIDTH = readFile.IMAGE_WIDTH
 IMAGE_HEIGHT = readFile.IMAGE_HEIGHT
 NUM_CLASSES = readFile.NUM_CLASSES
@@ -54,12 +51,13 @@ NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = readFile.NUM_EXAMPLES_PER_EPOCH_FOR_EVAL
 MOVING_AVERAGE_DECAY = 0.9999     # The decay to use for the moving average.
 NUM_EPOCHS_PER_DECAY = 350.0      # Epochs after which learning rate decays.
 LEARNING_RATE_DECAY_FACTOR = 0.1  # Learning rate decay factor.
-INITIAL_LEARNING_RATE = 0.1       # Initial learning rate.
+INITIAL_LEARNING_RATE = 0.05       # Initial learning rate. , from 0.1
 
 # If a model is trained with multiple GPUs, prefix all Op names with tower_name
 # to differentiate the operations. Note that this prefix is removed from the
 # names of the summaries when visualizing a model.
 TOWER_NAME = 'tower'
+
 
 #will not be using this url
 DATA_URL = 'http://marathon.csee.usf.edu/Mammography/Database.html'
@@ -80,8 +78,8 @@ def _activation_summary(x):
   # Remove 'tower_[0-9]/' from the name in case this is a multi-GPU training
   # session. This helps the clarity of presentation on tensorboard.
   tensor_name = re.sub('%s_[0-9]*/' % TOWER_NAME, '', x.op.name)
-  tf.histogram_summary(tensor_name + '/activations', x)
-  tf.scalar_summary(tensor_name + '/sparsity',
+  tf.summary.histogram(tensor_name + '/activations', x)
+  tf.summary.scalar(tensor_name + '/sparsity',
                                        tf.nn.zero_fraction(x))
 
 
@@ -137,6 +135,8 @@ def distorted_inputs():
   Returns:
     images: Images. 4D tensor of [batch_size, IMAGE_WIDTH, IMAGE_HEIGHT, 1] size.
     labels: Labels. 1D tensor of [batch_size] size.
+    enqueue op
+
 
   Raises:
     ValueError: If no data_dir
@@ -144,13 +144,13 @@ def distorted_inputs():
   if not FLAGS.data_dir:
     raise ValueError('Please supply a data_dir')
   data_dir = FLAGS.data_dir
-  # data_dir = os.path.join(FLAGS.data_dir, 'cifar-10-batches-bin')
-  images, labels = readFile.distorted_inputs(data_dir=data_dir,
+
+  images, labels, rsq, enqueueOP = readFile.distorted_inputs(data_dir=data_dir,
                                                   batch_size=FLAGS.batch_size)
   if FLAGS.use_fp16:
     images = tf.cast(images, tf.float16)
     labels = tf.cast(labels, tf.float16)
-  return images, labels
+  return images, labels, rsq, enqueueOP
 
 
 
@@ -172,14 +172,14 @@ def inputs(eval_data):
   if not FLAGS.data_dir:
     raise ValueError('Please supply a data_dir')
   data_dir = FLAGS.data_dir
-  #data_dir = os.path.join(FLAGS.data_dir, 'cifar-10-batches-bin')
-  images, labels = readFile.inputs(eval_data=eval_data,
+
+  images, labels, rsq, enqueueOP = readFile.inputs(eval_data=eval_data,
                                         data_dir=data_dir,
                                         batch_size=FLAGS.batch_size)
   if FLAGS.use_fp16:
     images = tf.cast(images, tf.float16)
     labels = tf.cast(labels, tf.float16)
-  return images, labels
+  return images, labels, rsq, enqueueOP
 
 
 
@@ -189,25 +189,27 @@ def inference(images):
 
   Args:
     images: Images returned from distorted_inputs() or inputs().
-    images: Images. 4D tensor of [batch_size, IMAGE_WIDTH, IMAGE_HEIGHT, 1] size.  ???? does this change the convolution
+    images: Images. 4D tensor of [batch_size, IMAGE_WIDTH, IMAGE_HEIGHT, 1] size.
+
+     ???? does this change the convolution
         and other filters and stuff, as i only have one channel and am looking for different sized features????????
 
   Returns:
     Logits.
   """
-  # We instantiate all variables using tf.get_variable() instead of
+  # We instantiate all variables using tf.Variable() instead of
   # tf.Variable() in order to share variables across multiple GPU training runs.
   # If we only ran this model on a single GPU, we could simplify this function
-  # by replacing all instances of tf.get_variable() with tf.Variable().
+  # by replacing all instances of tf.Variable() with tf.Variable().
   #
   # conv1
   with tf.variable_scope('conv1') as scope:
     kernel = _variable_with_weight_decay('weights',
-                                         shape=[5, 5, 3, 64],
+                                         shape=[5, 5, 1, 10],   # unsure about the shape of this kernel/filter
                                          stddev=5e-2,
                                          wd=0.0)
     conv = tf.nn.conv2d(images, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [64], tf.constant_initializer(0.0))
+    biases = _variable_on_cpu('biases', [10], tf.constant_initializer(0.0))
     pre_activation = tf.nn.bias_add(conv, biases)
     conv1 = tf.nn.relu(pre_activation, name=scope.name)
     _activation_summary(conv1)
@@ -222,11 +224,11 @@ def inference(images):
   # conv2
   with tf.variable_scope('conv2') as scope:
     kernel = _variable_with_weight_decay('weights',
-                                         shape=[5, 5, 64, 64],
+                                         shape=[5, 5, 10, 10],
                                          stddev=5e-2,
                                          wd=0.0)
     conv = tf.nn.conv2d(norm1, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [64], tf.constant_initializer(0.1))
+    biases = _variable_on_cpu('biases', [10], tf.constant_initializer(0.1))
     pre_activation = tf.nn.bias_add(conv, biases)
     conv2 = tf.nn.relu(pre_activation, name=scope.name)
     _activation_summary(conv2)
@@ -317,14 +319,14 @@ def _add_loss_summaries(total_loss):
   for l in losses + [total_loss]:
     # Name each loss as '(raw)' and name the moving average version of the loss
     # as the original loss name.
-    tf.scalar_summary(l.op.name + ' (raw)', l)
-    tf.scalar_summary(l.op.name, loss_averages.average(l))
+    tf.summary.scalar(l.op.name + ' (raw)', l)
+    tf.summary.scalar(l.op.name, loss_averages.average(l))
 
   return loss_averages_op
 
 
-def train(total_loss, global_step):
-  """Train CIFAR-10 model.
+def train(total_loss, global_step, rsq, enqueueOP):
+  """Train  model.
 
   Create an optimizer and apply to all trainable variables. Add moving
   average for all trainable variables.
@@ -336,6 +338,12 @@ def train(total_loss, global_step):
   Returns:
     train_op: op for training.
   """
+
+
+  #create queue runner train enqueueOP
+  qr = tf.train.QueueRunner(rsq, [enqueueOP] * 2)
+
+
   # Variables that affect learning rate.
   num_batches_per_epoch = NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN / FLAGS.batch_size
   decay_steps = int(num_batches_per_epoch * NUM_EPOCHS_PER_DECAY)
@@ -346,7 +354,7 @@ def train(total_loss, global_step):
                                   decay_steps,
                                   LEARNING_RATE_DECAY_FACTOR,
                                   staircase=True)
-  tf.scalar_summary('learning_rate', lr)
+  tf.summary.scalar('learning_rate', lr)
 
   # Generate moving averages of all losses and associated summaries.
   loss_averages_op = _add_loss_summaries(total_loss)
@@ -361,12 +369,12 @@ def train(total_loss, global_step):
 
   # Add histograms for trainable variables.
   for var in tf.trainable_variables():
-    tf.histogram_summary(var.op.name, var)
+    tf.summary.histogram(var.op.name, var)
 
   # Add histograms for gradients.
   for grad, var in grads:
     if grad is not None:
-      tf.histogram_summary(var.op.name + '/gradients', grad)
+      tf.summary.histogram(var.op.name + '/gradients', grad)
 
   # Track the moving averages of all trainable variables.
   variable_averages = tf.train.ExponentialMovingAverage(
@@ -376,31 +384,8 @@ def train(total_loss, global_step):
   with tf.control_dependencies([apply_gradient_op, variables_averages_op]):
     train_op = tf.no_op(name='train')
 
-  return train_op
+  return train_op, qr
 
-
-'''
-DON'T NEED TO DO THIS
-
-def maybe_download_and_extract():
-  """Download and extract the tarball from Alex's website."""
-  dest_directory = FLAGS.data_dir
-  if not os.path.exists(dest_directory):
-    os.makedirs(dest_directory)
-  filename = DATA_URL.split('/')[-1]
-  filepath = os.path.join(dest_directory, filename)
-  if not os.path.exists(filepath):
-    def _progress(count, block_size, total_size):
-      sys.stdout.write('\r>> Downloading %s %.1f%%' % (filename,
-          float(count * block_size) / float(total_size) * 100.0))
-      sys.stdout.flush()
-    filepath, _ = moves.urllib.request.urlretrieve(DATA_URL, filepath, _progress)
-    print()
-    statinfo = os.stat(filepath)
-    print('Successfully downloaded', filename, statinfo.st_size, 'bytes.')
-
-  tarfile.open(filepath, 'r:gz').extractall(dest_directory)
-'''
 
 
 

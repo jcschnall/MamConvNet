@@ -5,56 +5,35 @@ from __future__ import division
 from __future__ import print_function
 import os
 import fnmatch
-# from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow as tf
-import ljpegConvert
-import copy
 
 
-
-#x by x pixels each image
-#for LJPEG...... need to look at each case one at a time...... and read .ics file
-#.ics file lists number of lines and number of pixels per line for each single image
-#would have to crop each image to a uniform standard... 4600 lines X 3000 pixels or so
-
-# the formate of CIFAR-10 data below
-# data -- a 10000x3072 numpy array of uint8s. Each row of the array stores a 32x32 colour image. The first 1024 entries contain
-# the red channel values, the next 1024 the green, and the final 1024 the blue. The image is stored in row-major order, so that the
-# first 32 entries of the array are the red channel values of the first row of the image.
-# labels -- a list of 10000 numbers in the range 0-9. The number at index i indicates the label of the ith image in the array data.
-
-
-
-#IMAGE_SIZE = 4600
-IMAGE_WIDTH = 4600
-IMAGE_HEIGHT = 3000
+IMAGE_WIDTH = 200
+IMAGE_HEIGHT = 350
 
 # Global constants
-#start with 2 classes, normal(N) / irregular(I)
-#only 2600 cases or images to compare
 #start with number currently on my computer......104 images.....even though not enough.......
-NUM_CLASSES = 2
-NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 104
-NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = 104   # as currently using same data, will change later......
+NUM_CLASSES = 2     # start with 2 classes, normal(0) / irregular(1)
+NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 561   # will change to 2600
+NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = 70   # want about 10%, so say will change to 200
 
 
 
 
-def readMamo(filename_queue):
+def readMamo(rsq):
 
     '''
 
      Args:
-    filename_queue: A queue of strings with the filenames to read from.
+    rsq(random shuffle queue): A queue of strings with the filenames and labels to read from.
 
     Returns:
     An object representing a single example, with the following fields:
       height: number of rows in the result
       width: number of columns in the result
-      depth: number of color channels in the result
-      key: a scalar string Tensor describing the filename & record number
-        for this example.
-      label: an int32 Tensor with the label in the range 0..9.
+      depth: number of color channels in the result, 1 only for grayscale
+      key: a scalar string Tensor describing the filename
+      label: an int32 Tensor with the label in the range 0..1.
       uint8image: a [height, width, depth] uint8 Tensor with the image data
     '''
 
@@ -64,57 +43,36 @@ def readMamo(filename_queue):
 
     result = CIFAR10Record()
 
-    # Dimensions of the images .
-    label_bytes = 1  # N or I..... will get the label from reading directory
-    result.height = 4600   #standardized sizes..... so will slightly crop images......
-    result.width = 3000
-    result.depth = 1  # changed to 1 from 3 as is grayscale
-    image_bytes = result.height * result.width * result.depth
+    # Dimensions of the images, as size reduced and cropped from jpeg originals
+    result.height = 350
+    result.width = 200
+    result.depth = 1  # changed to 1 from 3 as is greyscale
+
 
 
     # Read a record, getting filenames from the filename_queue.
-    reader = tf.WholeFileReader()
+    gotf, gotl = rsq.dequeue()
 
-
-    result.key, result.value = reader.read(filename_queue) # here key is the filename and value is the whole file
-
-
-    '''
-    SCREW THIS:
-    GOING TO HAVE TO JUST WRITE A PYTHONG SCRIPT TO CONVERT ALL LJPEG IMAGES
-    TO JPEG IMAGES, BEFORE EVEN RUNNING TENSORFLOW AT ALL...............
-
-    '''
+    result.key = gotf    # filename string tensor
+    result.value = tf.read_file(gotf)  # tenor.string with acutal image
+    result.label = gotl  # label int32 0 or 1 tensor
 
 
 
-    # call ljpeg for conversion here, using duplicate Queue file_name
-    result.value = ljpegConvert.convert(result.key)
+    # decode jpeg
+    # downsize and redize to correct tensor size 200X300
+    # will want to view actual images in tensorboard later to see how they look
+    result.value = tf.image.decode_jpeg(result.value, ratio=8)
+    result.value = tf.image.resize_images(result.value,[350,200])
 
 
-    # Convert from a string to a vector of uint8 that is record_bytes long.
-    record_bytes = result.value   #tf.decode_raw(value, tf.uint8)
+
+    #label, which we convert from uint8->int32.
+    result.label = tf.cast(tf.reshape(result.label,[1]), tf.int32)
 
 
-
-    # The first bytes represent the label, which we convert from uint8->int32.
-    #result.label = tf.cast(
-    #    tf.strided_slice(record_bytes, [0], [label_bytes]), tf.int32)
-
-    #take directory from filename to check if normal(1) or irregular(2)
-    if "cancer" in result.key:
-        result.label = 2
-
-    else:
-        result.label = 1
-
-
-    # The remaining bytes represent the image, which we reshape
-    # from [depth * height * width] to [depth, height, width].
-    depth_major = tf.reshape(record_bytes,
-        [result.depth, result.height, result.width])
-    # Convert from [depth, height, width] to [height, width, depth].
-    result.uint8image = tf.transpose(depth_major, [1, 2, 0])
+    # convert image to uint8
+    result.uint8image = tf.cast(result.value, tf.uint8)
 
     return result
 
@@ -122,7 +80,7 @@ def readMamo(filename_queue):
 
 
 def _generate_image_and_label_batch(image, label, min_queue_examples,
-                                    batch_size, shuffle):
+                                    batch_size, rsq, enqueueOP, shuffle):
   """Construct a queued batch of images and labels.
 
   Args:
@@ -147,6 +105,7 @@ def _generate_image_and_label_batch(image, label, min_queue_examples,
         num_threads=num_preprocess_threads,
         capacity=min_queue_examples + 3 * batch_size,
         min_after_dequeue=min_queue_examples)
+
   else:
     images, label_batch = tf.train.batch(
         [image, label],
@@ -155,15 +114,10 @@ def _generate_image_and_label_batch(image, label, min_queue_examples,
         capacity=min_queue_examples + 3 * batch_size)
 
   # Display the training images in the visualizer.
-  tf.image_summary('images', images)
+  tf.summary.image('images', images)
 
-  '''
-  below isn't necessary as ljpeg is converted in above function, and images are already in correct form
-  run command in ljpeg directory and will output viewable file to output.jpg
-  ./ljpeg.py /Users/Josh/Desktop/BioNeurNets/normal_10/case3660/B_3660_1.LEFT_CC.LJPEG output.jpg --visual --scale 0.3
-  '''
 
-  return images, tf.reshape(label_batch, [batch_size])
+  return images, tf.reshape(label_batch, [batch_size]), rsq, enqueueOP
 
 
 
@@ -172,51 +126,75 @@ def _generate_image_and_label_batch(image, label, min_queue_examples,
 
 
 def distorted_inputs(data_dir, batch_size):
-  """Construct distorted input for CIFAR training using the Reader ops.
+  """Construct distorted input
 
   Args:
-    data_dir: Path to the CIFAR-10 data directory.
+    data_dir: directory of jpeg images
     batch_size: Number of images per batch.
 
   Returns:
-    images: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
+    images: Images. 4D tensor of [batch_size, IMAGE_HEIGHT, IMAGE_WIDTH, 1] size.
     labels: Labels. 1D tensor of [batch_size] size.
+    enqueueOP
   """
 
 
-  # start by just taking the first image in a case file, there are actually 4 images per case..... could use more later
-  root = '/Users/Josh/Desktop/BioNeurNets/mamoData'
-  pattern = "*.LEFT_CC.LJPEG"
-  filenames = []
+  #currently only using single LEFT CC view from each case......
+  data_dir = '/Users/Josh/PycharmProjects/mamoConvAI/ljpeg/convertedMamoData'
 
-  for path, subdirs, files in os.walk(root):
-      for name in files:
-          if fnmatch.fnmatch(name, pattern):
-              ljFileName = os.path.join(path, name)
-              filenames.append(ljFileName)
+  pattern = "*.LEFT_CC.LJPEG.jpg"
+  filenames = []
+  labels = []
+
+  # fill both filename list and corresponding label list
+  for path, subdirs, files in os.walk(data_dir):
+    for name in files:
+        if fnmatch.fnmatch(name, pattern):
+            ljFileName = os.path.join(path, name)
+            filenames.append(ljFileName)
+            if 'cancer' in ljFileName:
+                labels.append(1)
+            else:
+                labels.append(0)
+
+
+  # 104 total converted jpeg images
+  num_examples_per_epoch = NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN
 
 
   for f in filenames:
     if not tf.gfile.Exists(f):
       raise ValueError('Failed to find file: ' + f)
 
-
-
   # Create a queue that produces the filenames to read.
-  filename_queue = tf.train.string_input_producer(filenames)
+  # set shuffle to false for now...... will want to find way to make true later
+  # filename_queue = tf.train.string_input_producer(filenames)
+  fv = tf.constant(filenames)
+  lv = tf.constant(labels)
+  rsq = tf.RandomShuffleQueue(200, 0, [tf.string, tf.int32], shapes=[[], []])
+
+
+
+  #create enqueueOP for graph
+  enqueueOP = rsq.enqueue_many([fv, lv])
+
 
   # Read examples from files in the filename queue.
-  read_input = readMamo(filename_queue)
+  read_input = readMamo(rsq)
+
+
+
   reshaped_image = tf.cast(read_input.uint8image, tf.float32)
 
-  height = IMAGE_HEIGHT
-  width = IMAGE_WIDTH
+
+
+  height = IMAGE_HEIGHT             #had previously -10
+  width = IMAGE_WIDTH               #had previously -10
 
   # Image processing for training the network. Note the many random
   # distortions applied to the image.
 
   # Randomly crop a [height, width] section of the image.
-  #this will have to take images before uniform cropping, for it to work............will have to change
   distorted_image = tf.random_crop(reshaped_image, [height, width, 1])
 
   # Randomly flip the image horizontally.
@@ -236,16 +214,20 @@ def distorted_inputs(data_dir, batch_size):
   float_image.set_shape([height, width, 1])
   read_input.label.set_shape([1])
 
+
+
+
+
   # Ensure that the random shuffling has good mixing properties.
   min_fraction_of_examples_in_queue = 0.4
   min_queue_examples = int(NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN *
                            min_fraction_of_examples_in_queue)
-  print ('Filling queue with %d CIFAR images before starting to train. '
+  print ('Filling queue with %d images before starting to train. '
          'This will take a few minutes.' % min_queue_examples)
 
   # Generate a batch of images and labels by building up a queue of examples.
   return _generate_image_and_label_batch(float_image, read_input.label,
-                                         min_queue_examples, batch_size,
+                                         min_queue_examples, batch_size, rsq, enqueueOP,
                                          shuffle=True)
 
 
@@ -265,26 +247,27 @@ def inputs(eval_data, data_dir, batch_size):
   """
 
   # start by just taking the first image in a case file, there are actually 4 images per case..... could use more later
-  data_dir = '/Users/Josh/Desktop/BioNeurNets/mamoData'
-  pattern = "*.LEFT_CC.LJPEG"
+  #this should be eval data directory
+  data_dir = '/Users/Josh/PycharmProjects/mamoConvAI/ljpeg/convertedMamoData/eval'
+
+  pattern = "*.LEFT_CC.LJPEG.jpg"
   filenames = []
+  labels = []
 
 
-  if not eval_data:
-      for path, subdirs, files in os.walk(data_dir):
-          for name in files:
-              if fnmatch(name, pattern):
-                  ljFileName = os.path.join(path, name)
-                  filenames.append(ljFileName)
+  for path, subdirs, files in os.walk(data_dir):
+      for name in files:
+          if fnmatch.fnmatch(name, pattern):
+              ljFileName = os.path.join(path, name)
+              filenames.append(ljFileName)
+
+              if 'cancer' in ljFileName:
+                  labels.append(1)
+              else:
+                  labels.append(0)
 
 
-      num_examples_per_epoch = NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN
-
-
-  else:
-    filenames = [os.path.join(data_dir, 'test_batch.bin')]  # will need to implement this later
-    num_examples_per_epoch = NUM_EXAMPLES_PER_EPOCH_FOR_EVAL
-
+  num_examples_per_epoch = NUM_EXAMPLES_PER_EPOCH_FOR_EVAL
 
 
 
@@ -292,13 +275,21 @@ def inputs(eval_data, data_dir, batch_size):
     if not tf.gfile.Exists(f):
       raise ValueError('Failed to find file: ' + f)
 
-  # Create a queue that produces the filenames to read.
-  #set shuffle to false for now...... will want to find way to make true later
-  filename_queue = tf.train.string_input_producer(filenames)
+
+
+  # Create a queue that produces the filenames and labels to read.
+  fv = tf.constant(filenames)
+  lv = tf.constant(labels)
+
+  rsqEval = tf.RandomShuffleQueue(200, 0, [tf.string, tf.int32], shapes=[[], []])
+  enqueueOPEval = rsqEval.enqueue_many([fv, lv])
+
 
   # Read examples from files in the filename queue.
-  read_input = readMamo(filename_queue)
+  read_input = readMamo(rsqEval)
   reshaped_image = tf.cast(read_input.uint8image, tf.float32)
+
+
 
   height = IMAGE_HEIGHT
   width = IMAGE_WIDTH
@@ -322,5 +313,5 @@ def inputs(eval_data, data_dir, batch_size):
 
   # Generate a batch of images and labels by building up a queue of examples.
   return _generate_image_and_label_batch(float_image, read_input.label,
-                                         min_queue_examples, batch_size,
+                                         min_queue_examples, batch_size, rsqEval, enqueueOPEval,
                                          shuffle=False)
