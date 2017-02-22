@@ -28,12 +28,57 @@ remote github repository:  MamConvNet
 
 '''
 
+'''
+This module will integrate all different views together...... as in train different views one at a time
+then tage an aggregate score of all views to make decision of class....................................
+
+0) convert images for other views and make new folders..................
+
+1)train each view separately , so 4 instances of train model with differnt file sources, and different folders for
+the model output.........., would essentially just run the training program 4 times in a row with different flag options
+
+2)for the eval, send one file from each view into each of the 4 different models and compute a score for each model
+ so need 4 paralell models, and drawing on 4 different files sources................
+
+3)add up this score to get an over all classification of the 4 images
+
+
+-so need 4 different instances of the training, and then 4 different instances of eval, and add evals scores for aggregate score
+'''
 
 
 
-import tensorflow as tf
-import numpy
-import math
+
+def main():
+    globals(view)
+    view = input("Enter the view you would like to train (1-4) or enter 5 to evaluate: ")
+    if(view == 1)
+        trainModel.py -flag1  - flag2 - flag3
+    elif(view == 2)
+        trainModel.py - flag1 - flag2 - flag3
+    elif(view == 3)
+        trainModel.py - flag1 - flag2 - flag3
+    elif(view == 4)
+        trainModel.py - flag1 - flag2 - flag3
+    elif(view ==5)
+        evalModel.py - flag - flag
+
+
+    return 0
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

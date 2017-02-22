@@ -8,8 +8,8 @@ import fnmatch
 import tensorflow as tf
 
 
-IMAGE_WIDTH = 200
-IMAGE_HEIGHT = 350
+IMAGE_WIDTH = 100          #changed from 200
+IMAGE_HEIGHT = 150          #changed from 350
 
 # Global constants
 #start with number currently on my computer......104 images.....even though not enough.......
@@ -44,8 +44,8 @@ def readMamo(rsq):
     result = CIFAR10Record()
 
     # Dimensions of the images, as size reduced and cropped from jpeg originals
-    result.height = 350
-    result.width = 200
+    result.height = 150                 # changed from 350
+    result.width = 100                   #  changed 200
     result.depth = 1  # changed to 1 from 3 as is greyscale
 
 
@@ -63,7 +63,7 @@ def readMamo(rsq):
     # downsize and redize to correct tensor size 200X300
     # will want to view actual images in tensorboard later to see how they look
     result.value = tf.image.decode_jpeg(result.value, ratio=8)
-    result.value = tf.image.resize_images(result.value,[350,200])
+    result.value = tf.image.resize_images(result.value,[150,100])  #changed from 350 / 200
 
 
 
@@ -140,9 +140,9 @@ def distorted_inputs(data_dir, batch_size):
 
 
   #currently only using single LEFT CC view from each case......
-  data_dir = '/Users/Josh/PycharmProjects/mamoConvAI/ljpeg/convertedMamoData'
+  data_dir = '/Users/Josh/PycharmProjects/mamoConvAI/ljpeg/convertedMamoData/train'
 
-  pattern = "*.LEFT_CC.LJPEG.jpg"
+  pattern = "*.LEFT_CC.LJPEG.jpg"    #  "*.RIGHT_MLO.LJPEG"    -     "*.LEFT_MLO.LJPEG"   -      "*.RIGHT_CC.LJPEG"
   filenames = []
   labels = []
 
@@ -171,7 +171,7 @@ def distorted_inputs(data_dir, batch_size):
   # filename_queue = tf.train.string_input_producer(filenames)
   fv = tf.constant(filenames)
   lv = tf.constant(labels)
-  rsq = tf.RandomShuffleQueue(200, 0, [tf.string, tf.int32], shapes=[[], []])
+  rsq = tf.RandomShuffleQueue(1000, 0, [tf.string, tf.int32], shapes=[[], []])
 
 
 
@@ -204,8 +204,8 @@ def distorted_inputs(data_dir, batch_size):
   # the order their operation.
   distorted_image = tf.image.random_brightness(distorted_image,
                                                max_delta=63)
-  distorted_image = tf.image.random_contrast(distorted_image,
-                                             lower=0.2, upper=1.8)
+ # distorted_image = tf.image.random_contrast(distorted_image,
+ #                                            lower=0.2, upper=1.8)
 
   # Subtract off the mean and divide by the variance of the pixels.
   float_image = tf.image.per_image_standardization(distorted_image)
@@ -248,7 +248,7 @@ def inputs(eval_data, data_dir, batch_size):
 
   # start by just taking the first image in a case file, there are actually 4 images per case..... could use more later
   #this should be eval data directory
-  data_dir = '/Users/Josh/PycharmProjects/mamoConvAI/ljpeg/convertedMamoData/eval'
+  data_dir = '/Users/Josh/PycharmProjects/mamoConvAI/ljpeg/convertedMamoData/evaluation'
 
   pattern = "*.LEFT_CC.LJPEG.jpg"
   filenames = []

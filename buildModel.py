@@ -25,6 +25,7 @@ from __future__ import print_function
 import re
 import tensorflow as tf
 import readFile
+import convViz
 
 
 FLAGS = tf.app.flags.FLAGS
@@ -205,14 +206,22 @@ def inference(images):
   # conv1
   with tf.variable_scope('conv1') as scope:
     kernel = _variable_with_weight_decay('weights',
-                                         shape=[5, 5, 1, 10],   # unsure about the shape of this kernel/filter
-                                         stddev=5e-2,
+                                         shape=[12, 12, 1, 20],   # changed kernel to 12,12 from 5,5, seems to be optim
+                                         stddev=5e-2,             # also so far with 10 features maps was best, now trying 32
                                          wd=0.0)
     conv = tf.nn.conv2d(images, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [10], tf.constant_initializer(0.0))
+    biases = _variable_on_cpu('biases', [20], tf.constant_initializer(0.0))
     pre_activation = tf.nn.bias_add(conv, biases)
     conv1 = tf.nn.relu(pre_activation, name=scope.name)
     _activation_summary(conv1)
+
+
+
+    #added below to visulize conv kernel feature extraction
+    tf.get_variable_scope().reuse_variables()
+    weights = tf.get_variable('weights')
+    grid = convViz.put_kernels_on_grid(weights)
+    tf.summary.image('conv1/features', grid)
 
   # pool1
   pool1 = tf.nn.max_pool(conv1, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
@@ -224,14 +233,26 @@ def inference(images):
   # conv2
   with tf.variable_scope('conv2') as scope:
     kernel = _variable_with_weight_decay('weights',
-                                         shape=[5, 5, 10, 10],
+                                         shape=[5, 5, 20, 30],     #question if output should be to 32 or more feature maps here
                                          stddev=5e-2,
                                          wd=0.0)
     conv = tf.nn.conv2d(norm1, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [10], tf.constant_initializer(0.1))
+    biases = _variable_on_cpu('biases', [30], tf.constant_initializer(0.1))
     pre_activation = tf.nn.bias_add(conv, biases)
     conv2 = tf.nn.relu(pre_activation, name=scope.name)
     _activation_summary(conv2)
+
+    # added below to visualize conv kernel feature extraction
+    tf.get_variable_scope().reuse_variables()
+    weights2 = tf.get_variable('weights')
+    grid1 = tf.split(2, 20, weights2)
+
+    # might want a slice of each of the grid1 list, instead of just one entry in the list ????????
+    # unsure about this here ?????????????
+    # also the visuals won't be anything recognizable, unless u backpropigate them through the earlier layers.......
+    #gridConcat = tf.concat(grid1[0][0:5].grid1[1][0:5])  etc etc
+    grid2 = convViz.put_kernels_on_grid(grid1[0])
+    tf.summary.image('conv2/features', grid2)
 
   # norm2
   norm2 = tf.nn.lrn(conv2, 4, bias=1.0, alpha=0.001 / 9.0, beta=0.75,

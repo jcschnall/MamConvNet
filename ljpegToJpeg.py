@@ -25,7 +25,7 @@ directForNew = 'convertedMamoData/'  #normal or cancer folders
 
 root = '/Users/Josh/PycharmProjects/mamoConvAI/ljpeg/'  #data within /mamoData
 root1 = '/Users/Josh/PycharmProjects/mamoConvAI/ljpeg/mamoData'
-pattern = "*.LEFT_CC.LJPEG"
+pattern =  "*.RIGHT_MLO.LJPEG"      # "*.LEFT_CC.LJPEG"    -     "*.LEFT_MLO.LJPEG"   -      "*.RIGHT_CC.LJPEG"
 #filenames = []
 
 
@@ -52,14 +52,14 @@ for path, subdirs, files in os.walk(root1):
             print currentFilePath[45:]
             print fileNameVar
             if 'cancer' in currentFilePath:
-                nORc = 'convertedMamoData/cancer/'
+                nORc = 'convertedMamoData/cancerV4/'  #cancer  Vx  v1 = LCC, v2 = lMLO v3 = RCC v4 = rMLO
                 bashCommand = "./ljpeg.py " +currentFilePath[
                                               45:] + " " + nORc + fileNameVar + ".jpg" + " --visual --scale 0.3"
                 print bashCommand
                 process = subprocess.Popen(bashCommand.split(), stdout=subprocess.PIPE)
                 output, error = process.communicate()
             else:
-                nORc = 'convertedMamoData/normal/'
+                nORc = 'convertedMamoData/normalV4/'  #normal  Vx  v1 = LCC, v2 = lMLO v3 = RCC v4 = rMLO
                 bashCommand = "./ljpeg.py " +currentFilePath[
                                               45:] + " " + nORc + fileNameVar + ".jpg" + " --visual --scale 0.3"
                 process = subprocess.Popen(bashCommand.split(), stdout=subprocess.PIPE)
